@@ -1,0 +1,11 @@
+[package]
+name = "ch347-rs"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+libc = "0.2"
+
+[build-dependencies]
+shadow-rs = "0.36"
