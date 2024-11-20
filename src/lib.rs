@@ -1,10 +1,10 @@
-mod common;
+mod dev;
 mod gpio;
 mod iic;
 mod jtag;
 mod spi;
 
-pub use common::*;
+pub use dev::*;
 pub use gpio::*;
 pub use iic::*;
 pub use jtag::*;

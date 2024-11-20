@@ -1,39 +1,19 @@
-// This file is the entry point of the Rust application. It initializes the command-line interface and handles user input to call the appropriate functions from the SPI, IIC, and GPIO modules.
-
-use std::env;
 use std::process;
 
-mod spi;
-mod iic;
-mod gpio;
-
+mod cli;
+mod cmd;
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    
-    if args.len() < 2 {
-        eprintln!("Usage: {} <command> [options]", args[0]);
+    let matches = cli::build_cli().get_matches();
+
+    if let Some(_) = matches.subcommand_matches("list") {
+        cmd::list_devices();
+    } else if let Some(spi_matches) = matches.subcommand_matches("spi") {
+        if let Some(matches) = spi_matches.subcommand_matches("init") {
+            cmd::init_spi(matches);
+        }
+    } else {
+        eprintln!("Unknown command");
+        let _ = cli::build_cli().print_help();
         process::exit(1);
     }
-
-    match args[1].as_str() {
-        "spi" => handle_spi(&args[2..]),
-        "iic" => handle_iic(&args[2..]),
-        "gpio" => handle_gpio(&args[2..]),
-        _ => {
-            eprintln!("Unknown command: {}", args[1]);
-            process::exit(1);
-        }
-    }
-}
-
-fn handle_spi(args: &[String]) {
-    // Handle SPI commands here
-}
-
-fn handle_iic(args: &[String]) {
-    // Handle IIC commands here
-}
-
-fn handle_gpio(args: &[String]) {
-    // Handle GPIO commands here
 }

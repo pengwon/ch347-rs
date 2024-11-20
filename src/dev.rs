@@ -1,10 +1,12 @@
 use libc::{c_char, c_int, c_uchar, c_ulong, c_ushort, c_void};
+use serde::Serialize;
+use std::fmt;
 
 #[link(name = "ch347")]
 extern "C" {
     fn CH347OpenDevice(dev_index: c_ulong) -> *mut c_void;
     fn CH347CloseDevice(dev_index: c_ulong) -> c_int;
-    fn CH347GetDeviceInfor(dev_index: c_ulong, dev_info: *mut DeviceInfo) -> c_int;
+    fn CH347GetDeviceInfor(dev_index: c_ulong, dev_info: *mut DeviceInfoRaw) -> c_int;
     fn CH347GetChipType(dev_index: c_ulong) -> c_uchar;
     fn CH347GetVersion(
         dev_index: c_ulong,
@@ -24,7 +26,7 @@ extern "C" {
 }
 
 #[repr(C)]
-pub struct DeviceInfo {
+pub struct DeviceInfoRaw {
     pub index: c_uchar,
     pub device_path: [c_char; 260],
     pub usb_class: c_uchar,
@@ -46,6 +48,64 @@ pub struct DeviceInfo {
     pub firmware_ver: c_uchar,
 }
 
+#[derive(Serialize)]
+pub struct DeviceInfo {
+    pub index: u8,
+    pub device_path: String,
+    pub usb_class: u8,
+    pub func_type: u8,
+    pub device_id: String,
+    pub chip_mode: u8,
+    pub bulk_out_endp_max_size: u16,
+    pub bulk_in_endp_max_size: u16,
+    pub usb_speed_type: u8,
+    pub ch347_if_num: u8,
+    pub data_up_endp: u8,
+    pub data_dn_endp: u8,
+    pub product_string: String,
+    pub manufacturer_string: String,
+    pub write_timeout: u32,
+    pub read_timeout: u32,
+    pub func_desc_str: String,
+    pub firmware_ver: u8,
+}
+
+impl DeviceInfo {
+    pub fn from_raw(raw: &DeviceInfoRaw) -> Self {
+        Self {
+            index: raw.index,
+            device_path: cstr_to_string(&raw.device_path),
+            usb_class: raw.usb_class,
+            func_type: raw.func_type,
+            device_id: cstr_to_string(&raw.device_id),
+            chip_mode: raw.chip_mode,
+            bulk_out_endp_max_size: raw.bulk_out_endp_max_size,
+            bulk_in_endp_max_size: raw.bulk_in_endp_max_size,
+            usb_speed_type: raw.usb_speed_type,
+            ch347_if_num: raw.ch347_if_num,
+            data_up_endp: raw.data_up_endp,
+            data_dn_endp: raw.data_dn_endp,
+            product_string: cstr_to_string(&raw.product_string),
+            manufacturer_string: cstr_to_string(&raw.manufacturer_string),
+            write_timeout: raw.write_timeout as u32,
+            read_timeout: raw.read_timeout as u32,
+            func_desc_str: cstr_to_string(&raw.func_desc_str),
+            firmware_ver: raw.firmware_ver,
+        }
+    }
+}
+
+impl fmt::Display for DeviceInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", serde_json::to_string_pretty(self).unwrap())
+    }
+}
+
+fn cstr_to_string(cstr: &[c_char]) -> String {
+    let cstr = unsafe { std::ffi::CStr::from_ptr(cstr.as_ptr()) };
+    cstr.to_string_lossy().into_owned()
+}
+
 pub type DeviceNotifyRoutine = Option<extern "C" fn(event_status: c_ulong)>;
 
 pub fn open_device(dev_index: u32) -> *mut c_void {
@@ -56,8 +116,8 @@ pub fn close_device(dev_index: u32) -> bool {
     unsafe { CH347CloseDevice(dev_index as c_ulong) != 0 }
 }
 
-pub fn get_device_info(dev_index: u32, dev_info: &mut DeviceInfo) -> bool {
-    unsafe { CH347GetDeviceInfor(dev_index as c_ulong, dev_info as *mut DeviceInfo) != 0 }
+pub fn get_device_info(dev_index: u32, dev_info: &mut DeviceInfoRaw) -> bool {
+    unsafe { CH347GetDeviceInfor(dev_index as c_ulong, dev_info as *mut DeviceInfoRaw) != 0 }
 }
 
 pub fn get_chip_type(dev_index: u32) -> u8 {
