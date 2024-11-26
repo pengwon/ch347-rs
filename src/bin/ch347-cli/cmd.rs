@@ -1,6 +1,6 @@
 use ch347_rs::{
-    close_device, get_device_info, open_device, spi_get_cfg, spi_init, spi_write, DeviceInfo,
-    DeviceInfoRaw, MSpiCfg,
+    close_device, get_device_info, gpio_get, gpio_set, open_device, spi_get_cfg, spi_init,
+    spi_write, uart_close, uart_get_device_info, uart_open, DeviceInfo, DeviceInfoRaw, MSpiCfg,
 };
 use clap::ArgMatches;
 use libc::c_void;
@@ -11,11 +11,7 @@ pub fn list_devices() {
     let invalid_handle_value = !0 as *mut c_void;
 
     for i in 0..max_device_number {
-        let handle = open_device(i);
-        if handle == invalid_handle_value {
-            break;
-        };
-
+        let mut handle: *mut c_void = uart_open(i);
         let mut dev_info_raw = DeviceInfoRaw {
             index: 0,
             device_path: [0; 260],
@@ -38,9 +34,21 @@ pub fn list_devices() {
             firmware_ver: 0,
         };
 
-        if get_device_info(i, &mut dev_info_raw) != false {
-            let dev_info = DeviceInfo::from_raw(&dev_info_raw);
-            devices.push(dev_info);
+        if handle != invalid_handle_value {
+            if uart_get_device_info(i, &mut dev_info_raw) {
+                let dev_info = DeviceInfo::from_raw(&dev_info_raw);
+                devices.push(dev_info);
+            }
+        } else {
+            handle = open_device(i);
+            if handle != invalid_handle_value {
+                if get_device_info(i, &mut dev_info_raw) {
+                    let dev_info = DeviceInfo::from_raw(&dev_info_raw);
+                    devices.push(dev_info);
+                }
+            } else {
+                break;
+            }
         }
     }
 
@@ -166,6 +174,48 @@ pub fn cmd_spi_write(matches: &ArgMatches) {
         println!("SPI write successful");
     } else {
         eprintln!("SPI write failed");
+    }
+}
+
+pub fn cmd_gpio_get(matches: &ArgMatches) {
+    let fd = *matches.get_one::<u32>("fd").unwrap();
+    let mut dir: u8 = 0;
+    let mut data: u8 = 0;
+
+    open_device(fd);
+    if gpio_get(fd, &mut dir, &mut data) {
+        for i in 0..8 {
+            let direction = if (dir & (1 << i)) != 0 { "O" } else { "I" };
+            let level = if (data & (1 << i)) != 0 { "1" } else { "0" };
+            println!("IO{}\t{}\t{}", i, direction, level);
+        }
+    } else {
+        eprintln!("Failed to read GPIO");
+    }
+}
+
+pub fn cmd_gpio_set(matches: &ArgMatches) {
+    let fd = *matches.get_one::<u32>("fd").unwrap();
+    let enable = parse_number(matches.get_one::<String>("enable").unwrap()).unwrap();
+    let set_dir_out = parse_number(matches.get_one::<String>("set-dir-out").unwrap()).unwrap();
+    let set_data_out = parse_number(matches.get_one::<String>("set-data-out").unwrap()).unwrap();
+
+    open_device(fd);
+    if gpio_set(fd, enable, set_dir_out, set_data_out) {
+        println!("GPIO set successfully");
+        let mut dir: u8 = 0;
+        let mut data: u8 = 0;
+        if gpio_get(fd, &mut dir, &mut data) {
+            for i in 0..8 {
+                let direction = if (dir & (1 << i)) != 0 { "O" } else { "I" };
+                let level = if (data & (1 << i)) != 0 { "1" } else { "0" };
+                println!("IO{}\t{}\t{}", i, direction, level);
+            }
+        } else {
+            eprintln!("Failed to read GPIO");
+        }
+    } else {
+        eprintln!("Failed to set GPIO");
     }
 }
 

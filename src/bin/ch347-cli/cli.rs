@@ -1,4 +1,5 @@
 use clap::{Arg, Command};
+mod gpio;
 mod spi;
 
 pub fn build_cli() -> Command {
@@ -26,4 +27,5 @@ pub fn build_cli() -> Command {
                 ),
         )
         .subcommand(spi::spi_subcommand())
+        .subcommand(gpio::gpio_subcommand())
 }
