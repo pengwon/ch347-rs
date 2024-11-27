@@ -22,6 +22,7 @@ fn main() {
         Some(("gpio", sub_matches)) => match sub_matches.subcommand() {
             Some(("get", get_matches)) => cmd::cmd_gpio_get(get_matches),
             Some(("set", set_matches)) => cmd::cmd_gpio_set(set_matches),
+            Some(("pwm", pwm_matches)) => cmd::cmd_gpio_pwm(pwm_matches),
             _ => {
                 eprintln!("Unknown GPIO command");
                 let _ = cli::build_cli().print_help();

@@ -1,9 +1,12 @@
 use ch347_rs::{
     close_device, get_device_info, gpio_get, gpio_set, open_device, spi_get_cfg, spi_init,
-    spi_write, uart_close, uart_get_device_info, uart_open, DeviceInfo, DeviceInfoRaw, MSpiCfg,
+    spi_write, uart_get_device_info, uart_open, DeviceInfo, DeviceInfoRaw, MSpiCfg,
 };
 use clap::ArgMatches;
 use libc::c_void;
+use std::collections::HashMap;
+use std::thread;
+use std::time::{Duration, Instant};
 
 pub fn list_devices() {
     let mut devices = Vec::new();
@@ -219,6 +222,30 @@ pub fn cmd_gpio_set(matches: &ArgMatches) {
     }
 }
 
+pub fn cmd_gpio_pwm(matches: &ArgMatches) {
+    let fd = *matches.get_one::<u32>("fd").unwrap();
+    let channels: Vec<u8> = matches
+        .get_many::<String>("channel")
+        .unwrap()
+        .flat_map(|s| s.split(','))
+        .map(|s| s.parse::<u8>().unwrap())
+        .collect();
+    let frequency = *matches.get_one::<u32>("frequency").unwrap();
+    let duty_cycles: Vec<u8> = matches
+        .get_many::<String>("duty_cycle")
+        .unwrap()
+        .flat_map(|s| s.split(','))
+        .map(|s| s.parse::<u8>().unwrap())
+        .collect();
+    let pulse_count = *matches.get_one::<u32>("pulse_count").unwrap();
+
+    // 调用设置 PWM 的函数
+    open_device(fd);
+    if !set_pwm(fd, &channels, frequency, &duty_cycles, pulse_count) {
+        eprintln!("Failed to set PWM");
+    }
+}
+
 fn parse_number(s: &str) -> Result<u8, String> {
     if s.starts_with("0x") {
         u8::from_str_radix(&s[2..], 16).map_err(|e| e.to_string())
@@ -235,4 +262,95 @@ fn parse_data(data: &str) -> Result<Vec<u8>, String> {
     data.split(|c| c == ' ' || c == ',')
         .map(|s| parse_number(s.trim()))
         .collect()
+}
+
+fn set_pwm(fd: u32, channels: &[u8], frequency: u32, duty_cycles: &[u8], pulse_count: u32) -> bool {
+    let enable: u8 = channels.iter().fold(0, |acc, &ch| acc | (1 << ch)); // 启用 GPIO
+    let dir_out: u8 = enable; // 设置为输出
+    let period = 1_000_000 / frequency; // 周期时间（微秒）
+
+    // 在 PWM 输出前将 GPIO 初始化为低电平
+    if !gpio_set(fd, enable, dir_out, 0) {
+        return false;
+    }
+
+    // 将通道按照占空比进行分组
+    let mut duty_cycle_to_channels: HashMap<u8, Vec<u8>> = HashMap::new();
+    for (i, &channel) in channels.iter().enumerate() {
+        let duty_cycle_index = if i < duty_cycles.len() {
+            i
+        } else {
+            duty_cycles.len() - 1
+        };
+        let duty_cycle = duty_cycles[duty_cycle_index];
+        duty_cycle_to_channels
+            .entry(duty_cycle)
+            .or_insert(Vec::new())
+            .push(channel);
+    }
+
+    // 计算每个占空比对应的时段结束时间
+    let mut times: Vec<(u32, u8)> = Vec::new();
+    let mut cumulative_time = 0;
+    let mut duty_cycle_values: Vec<&u8> = duty_cycle_to_channels.keys().collect();
+    duty_cycle_values.sort();
+
+    let mut data_out = 0; // 初始状态，所有通道低电平
+    times.push((0, data_out)); // 起始事件
+
+    for &dc in &duty_cycle_values {
+        let duration = period * (*dc as u32) / 100;
+        cumulative_time += duration;
+
+        // 在对应时段开始时将对应通道置高
+        let channels = &duty_cycle_to_channels[dc];
+        let channels_mask = channels.iter().fold(0, |acc, &ch| acc | (1 << ch));
+        data_out |= channels_mask;
+        times.push((cumulative_time - duration, data_out));
+
+        // 在对应时段结束时将对应通道置低
+        data_out &= !channels_mask;
+        times.push((cumulative_time, data_out));
+    }
+
+    // 确保最后一个时段结束在周期结束处
+    if cumulative_time < period {
+        times.push((period, 0));
+    }
+
+    // 按时间排序事件
+    times.sort_by_key(|&(time, _)| time);
+
+    // 开始 PWM 信号输出
+    if pulse_count == 0 {
+        // 连续输出
+        loop {
+            let start = Instant::now();
+            for &(time, state) in &times {
+                let elapsed = start.elapsed().as_micros() as u32;
+                if time > elapsed {
+                    thread::sleep(Duration::from_micros((time - elapsed) as u64));
+                }
+                if !gpio_set(fd, enable, dir_out, state) {
+                    return false;
+                }
+            }
+        }
+    } else {
+        // 输出指定脉冲数
+        for _ in 0..pulse_count {
+            let start = Instant::now();
+            for &(time, state) in &times {
+                let elapsed = start.elapsed().as_micros() as u32;
+                if time > elapsed {
+                    thread::sleep(Duration::from_micros((time - elapsed) as u64));
+                }
+                if !gpio_set(fd, enable, dir_out, state) {
+                    return false;
+                }
+            }
+        }
+    }
+
+    true
 }
