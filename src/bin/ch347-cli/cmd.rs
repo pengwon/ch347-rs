@@ -322,32 +322,32 @@ fn set_pwm(fd: u32, channels: &[u8], frequency: u32, duty_cycles: &[u8], pulse_c
     times.sort_by_key(|&(time, _)| time);
 
     // 开始 PWM 信号输出
+    let output_pwm = |times: &[(u32, u8)]| -> bool {
+        let start = Instant::now();
+        for &(time, state) in times {
+            let elapsed = start.elapsed().as_micros() as u32;
+            if time > elapsed {
+                thread::sleep(Duration::from_micros((time - elapsed) as u64));
+            }
+            if !gpio_set(fd, enable, dir_out, state) {
+                return false;
+            }
+        }
+        true
+    };
+
     if pulse_count == 0 {
         // 连续输出
         loop {
-            let start = Instant::now();
-            for &(time, state) in &times {
-                let elapsed = start.elapsed().as_micros() as u32;
-                if time > elapsed {
-                    thread::sleep(Duration::from_micros((time - elapsed) as u64));
-                }
-                if !gpio_set(fd, enable, dir_out, state) {
-                    return false;
-                }
+            if !output_pwm(&times) {
+                return false;
             }
         }
     } else {
         // 输出指定脉冲数
         for _ in 0..pulse_count {
-            let start = Instant::now();
-            for &(time, state) in &times {
-                let elapsed = start.elapsed().as_micros() as u32;
-                if time > elapsed {
-                    thread::sleep(Duration::from_micros((time - elapsed) as u64));
-                }
-                if !gpio_set(fd, enable, dir_out, state) {
-                    return false;
-                }
+            if !output_pwm(&times) {
+                return false;
             }
         }
     }
