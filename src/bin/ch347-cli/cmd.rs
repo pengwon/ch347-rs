@@ -4,8 +4,8 @@ use ch347_rs::{
 };
 use clap::ArgMatches;
 use libc::c_void;
+use spin_sleep::SpinSleeper;
 use std::collections::HashMap;
-use std::thread;
 use std::time::{Duration, Instant};
 
 pub fn list_devices() {
@@ -274,6 +274,10 @@ fn set_pwm(fd: u32, channels: &[u8], frequency: u32, duty_cycles: &[u8], pulse_c
         return false;
     }
 
+    // 构造一个 SpinSleeper：忙等阈值 100µs，超过则调用 thread::sleep
+    let sleeper =
+        SpinSleeper::new(100000).with_spin_strategy(spin_sleep::SpinStrategy::YieldThread);
+
     // 将通道按照占空比进行分组
     let mut duty_cycle_to_channels: HashMap<u8, Vec<u8>> = HashMap::new();
     for (i, &channel) in channels.iter().enumerate() {
@@ -322,13 +326,12 @@ fn set_pwm(fd: u32, channels: &[u8], frequency: u32, duty_cycles: &[u8], pulse_c
     times.sort_by_key(|&(time, _)| time);
 
     // 开始 PWM 信号输出
+    // 用闭包输出一次完整周期
     let output_pwm = |times: &[(u32, u8)]| -> bool {
         let start = Instant::now();
         for &(time, state) in times {
-            let elapsed = start.elapsed().as_micros() as u32;
-            if time > elapsed {
-                thread::sleep(Duration::from_micros((time - elapsed) as u64));
-            }
+            let target = start + Duration::from_micros(time as u64);
+            sleeper.sleep(target - Instant::now());
             if !gpio_set(fd, enable, dir_out, state) {
                 return false;
             }
